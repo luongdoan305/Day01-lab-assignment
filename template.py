@@ -13,6 +13,11 @@ import os
 import time
 from typing import Any, Callable
 
+from openrouter import OpenRouter
+
+from dotenv import load_dotenv
+load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Estimated costs per 1K OUTPUT tokens (USD) — update if pricing changes
 # ---------------------------------------------------------------------------
@@ -21,7 +26,7 @@ COST_PER_1K_OUTPUT_TOKENS = {
     "gpt-4o-mini": 0.0006,
 }
 
-OPENAI_MODEL = "gpt-4o"
+OPENAI_MODEL = "openai/gpt-4o-mini-2024-07-18"
 OPENAI_MINI_MODEL = "gpt-4o-mini"
 
 
@@ -32,8 +37,7 @@ def call_openai(
     prompt: str,
     model: str = OPENAI_MODEL,
     temperature: float = 0.7,
-    top_p: float = 0.9,
-    max_tokens: int = 256,
+    max_tokens: int = 200,
 ) -> tuple[str, float]:
     """
     Call the OpenAI Chat Completions API and return the response text + latency.
@@ -42,19 +46,37 @@ def call_openai(
         prompt:      The user message to send.
         model:       The OpenAI model to use (default: gpt-4o).
         temperature: Sampling temperature (0.0 – 2.0).
-        top_p:       Nucleus sampling threshold.
         max_tokens:  Maximum number of tokens to generate.
 
     Returns:
         A tuple of (response_text: str, latency_seconds: float).
 
     Hint:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        from openrouter import OpenRouter
     """
-    # TODO: import OpenAI, create client, call chat.completions.create,
-    #       measure start/end time, return (response_text, latency)
-    raise NotImplementedError("Implement call_openai")
+    API_KEY = os.getenv("OPENROUTER_API_KEY")
+    if not API_KEY:
+        raise RuntimeError("Missing OPENROUTER_API_KEY")
+
+    start_time = time.time()
+    with OpenRouter(
+        api_key=API_KEY,
+    ) as client:
+        response = client.chat.send(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    latency = time.time() - start_time
+
+    response_text = response.choices[0].message.content
+    return response_text, latency
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +230,6 @@ def format_comparison_table(results: list[dict]) -> str:
 # Entry point for manual testing
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    test_prompt = "Explain the difference between temperature and top_p in one sentence."
-    print("=== Comparing models ===")
-    result = compare_models(test_prompt)
-    for key, value in result.items():
-        print(f"{key}: {value}")
-
-    print("\n=== Starting chatbot (type 'quit' to exit) ===")
-    streaming_chatbot()
+    response, latency = call_openai("Explain AI Infrastructure in simple words.")
+    print(response)
+    print(f"Latency: {latency:.2f}s")
