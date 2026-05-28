@@ -37,6 +37,7 @@ def call_openai(
     prompt: str,
     model: str = OPENAI_MODEL,
     temperature: float = 0.7,
+    top_p: float = 0.9,
     max_tokens: int = 200,
 ) -> tuple[str, float]:
     """
@@ -71,6 +72,7 @@ def call_openai(
                 }
             ],
             temperature=temperature,
+            top_p=top_p,
             max_tokens=max_tokens,
         )
     latency = time.time() - start_time
@@ -104,8 +106,13 @@ def call_openai_mini(
     Hint:
         Reuse call_openai() by passing model=OPENAI_MINI_MODEL.
     """
-    # TODO: call call_openai with model=OPENAI_MINI_MODEL
-    raise NotImplementedError("Implement call_openai_mini")
+    return call_openai(
+        prompt=prompt,
+        model=OPENAI_MINI_MODEL,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +138,26 @@ def compare_models(prompt: str) -> dict:
         Cost estimate = (len(response.split()) / 0.75) / 1000 * COST_PER_1K_OUTPUT_TOKENS["gpt-4o"]
         (0.75 words ≈ 1 token is a rough approximation)
     """
-    # TODO: call call_openai and call_openai_mini, assemble and return the dict
-    raise NotImplementedError("Implement compare_models")
+    gpt4o_response, gpt4o_latency = call_openai(prompt)
+    mini_response, mini_latency = call_openai_mini(prompt)
+
+    estimated_tokens = len(gpt4o_response.split()) / 0.75
+    cost_estimates = {
+        "gpt-4o": (
+            estimated_tokens / 1000
+        ) * COST_PER_1K_OUTPUT_TOKENS["gpt-4o"],
+        "gpt-4o-mini": (
+            estimated_tokens / 1000
+        ) * COST_PER_1K_OUTPUT_TOKENS["gpt-4o-mini"],
+    }
+
+    return {
+        "gpt4o_response": gpt4o_response,
+        "mini_response": mini_response,
+        "gpt4o_latency": gpt4o_latency,
+        "mini_latency": mini_latency,
+        "gpt4o_cost_estimate": cost_estimates["gpt-4o"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +181,69 @@ def streaming_chatbot() -> None:
         - After each turn, append the assistant reply to history.
         - Trim history to the last 3 turns: history = history[-3:]
     """
-    # TODO: enter while-loop, read user input, stream response, maintain history
-    raise NotImplementedError("Implement streaming_chatbot")
+    API_KEY = os.getenv("OPENROUTER_API_KEY")
+    if not API_KEY:
+        raise RuntimeError("Missing OPENROUTER_API_KEY")
+
+    history = []
+
+    while True:
+        user_input = input("\nYou: ")
+
+        if user_input.lower() in ("quit", "exit", "q"):
+            print("Goodbye!")
+            break
+
+        history.append({
+            "role": "user",
+            "content": user_input,
+        })
+
+        messages = history[-6:]
+
+        with OpenRouter(api_key=API_KEY) as client:
+            assistant_response = ""
+
+            try:
+                stream = client.chat.send(
+                    model=OPENAI_MINI_MODEL,
+                    messages=messages,
+                    temperature=0.7,
+                    top_p=0.9,
+                    max_tokens=256,
+                    stream=True,
+                )
+
+                print("\nBot: ", end="", flush=True)
+
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta.content or ""
+
+                    if delta:
+                        print(delta, end="", flush=True)
+                        assistant_response += delta
+
+                print()
+            except Exception:
+                response = client.chat.send(
+                    model=OPENAI_MINI_MODEL,
+                    messages=messages,
+                    temperature=0.7,
+                    top_p=0.9,
+                    max_tokens=256,
+                )
+
+                assistant_response = response.choices[0].message.content
+                print("\nBot:", assistant_response)
+
+        history.append({
+            "role": "assistant",
+            "content": assistant_response,
+        })
+        history = history[-6:]
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +316,6 @@ def format_comparison_table(results: list[dict]) -> str:
 # Entry point for manual testing
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    response, latency = call_openai("Explain AI Infrastructure in simple words.")
-    print(response)
-    print(f"Latency: {latency:.2f}s")
+    print("\n=== TASK 4 TEST ===")
+
+    streaming_chatbot()
